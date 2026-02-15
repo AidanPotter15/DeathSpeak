@@ -1,0 +1,9 @@
+name: DeathSpeak
+version: '0.0.0.1'
+main: net.cosmiccascade.deathspeak.DeathSpeak
+api-version: '1.21'
+
+commands:
+  deathspeak:
+    description: Trigger DeathSpeak manually
+    usage: /deathspeak <word>
