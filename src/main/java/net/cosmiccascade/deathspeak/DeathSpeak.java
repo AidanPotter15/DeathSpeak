@@ -199,31 +199,43 @@ public final class DeathSpeak extends JavaPlugin {
      */
     private Set<Material> resolveTargets(String word) {
 
-        String w = word.toLowerCase();
+        String spoken = word.toLowerCase().trim();
 
-        // 1) exact keyword match
-        Set<Material> exact = keywordMap.get(w);
-        if (exact != null) return EnumSet.copyOf(exact);
+        // 1) Exact keyword match from config
+        Set<Material> exactKeyword = keywordMap.get(spoken);
+        if (exactKeyword != null && !exactKeyword.isEmpty()) {
+            return EnumSet.copyOf(exactKeyword);
+        }
 
-        // 2) exact block name match ("end_stone" or "end stone")
-        String normalized = w.replace("minecraft:", "").replace(" ", "_");
+        // 2) Exact material match (lets people say "diamond_ore" or "end stone")
+        // Normalize common formats: "minecraft:end_stone", "end stone", "end_stone"
+        String normalized = spoken
+                .replace("minecraft:", "")
+                .replace("-", "_")
+                .replace(" ", "_");
+
         Material exactMat = Material.matchMaterial(normalized);
         if (exactMat != null && exactMat.isBlock() && !protectedBlocks.contains(exactMat)) {
             return EnumSet.of(exactMat);
         }
 
-        // 3) substring keyword match ("friend" contains "end")
+        // 3) Substring keyword match ("friend" contains "end")
         if (substringKeywords) {
             for (Map.Entry<String, Set<Material>> entry : keywordMap.entrySet()) {
-                if (w.contains(entry.getKey())) {
-                    return EnumSet.copyOf(entry.getValue());
+                String key = entry.getKey(); // already lowercase
+                if (spoken.contains(key)) {
+                    Set<Material> mats = entry.getValue();
+                    if (mats != null && !mats.isEmpty()) {
+                        return EnumSet.copyOf(mats);
+                    }
                 }
             }
         }
 
-        // 4) otherwise none
+        // 4) No match -> no effect (predictable + safe)
         return EnumSet.noneOf(Material.class);
     }
+
     //endregion
 
     //region Config loading

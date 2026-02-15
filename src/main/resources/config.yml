@@ -23,12 +23,99 @@ protected-blocks:
 # - A TAG: PLANKS, WOODEN_SLABS, WOODEN_STAIRS, LOGS, etc.
 # - A MATERIAL: END_STONE, NETHERRACK, BEDROCK, STONE, etc.
 keywords:
-  wood: PLANKS
-  slab: WOODEN_SLABS
-  stairs: WOODEN_STAIRS
 
-  end: END_STONE
+  # ===== TERRAIN / COMMON =====
+  stone: STONE_LIKE
+  rock: STONE_LIKE
+
+  dirt: DIRT_LIKE
+  mud: DIRT_LIKE
+  grass: DIRT_LIKE
+
+  sand: SAND_LIKE
+  gravel: GRAVEL
+  clay: CLAY
+
+  snow: SNOW
+  ice: ICE_LIKE
+
+  # ===== WOOD (wood = planks only) =====
+  wood: PLANKS
+  plank: PLANKS
+  planks: PLANKS
+
+  log: LOGS
+  logs: LOGS
+  leaves: LEAVES
+  leaf: LEAVES
+
+  # ===== UNIVERSAL SHAPES (all materials) =====
+  slab: SLABS
+  slabs: SLABS
+
+  stair: STAIRS
+  stairs: STAIRS
+
+  wall: WALLS
+  walls: WALLS
+
+  fence: FENCES
+  fences: FENCES
+
+  gate: FENCE_GATES
+  gates: FENCE_GATES
+
+  door: DOORS
+  doors: DOORS
+
+  trapdoor: TRAPDOORS
+  trapdoors: TRAPDOORS
+
+  button: BUTTONS
+  buttons: BUTTONS
+
+  plate: PRESSURE_PLATES
+  plates: PRESSURE_PLATES
+
+  # ===== ORES =====
+  ore: ORES
+  ores: ORES
+
+  coal: COAL_ORES
+  copper: COPPER_ORES
+  iron: IRON_ORES
+  gold: GOLD_ORES
+  redstone: REDSTONE_ORES
+  lapis: LAPIS_ORES
+  diamond: DIAMOND_ORES
+  emerald: EMERALD_ORES
+
+  quartz: NETHER_QUARTZ_ORE
+  debris: ANCIENT_DEBRIS
+
+  # ===== NETHER / END =====
   nether: NETHERRACK
   rack: NETHERRACK
 
+  soul: SOUL_BLOCKS
+  end: END_STONE
+
+  # ===== BUILDING MATERIALS =====
+  glass: GLASS
+  pane: GLASS_PANES
+  panes: GLASS_PANES
+
+  brick: BRICKS
+  bricks: BRICKS
+
+  concrete: CONCRETE
+  terracotta: TERRACOTTA
+  wool: WOOL
+
+  # ===== LIQUIDS =====
+  water: WATER
+  lava: LAVA
+
+  # ===== SPECIAL =====
   bedrock: BEDROCK
+

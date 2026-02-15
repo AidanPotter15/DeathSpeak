@@ -1,5 +1,5 @@
 name: DeathSpeak
-version: '0.0.0.1'
+version: '0.0.0.5'
 main: net.cosmiccascade.deathspeak.DeathSpeak
 api-version: '1.21'
 
