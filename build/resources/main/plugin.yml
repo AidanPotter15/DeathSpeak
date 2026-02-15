@@ -6,4 +6,9 @@ api-version: '1.21'
 commands:
   deathspeak:
     description: Trigger DeathSpeak manually
-    usage: /deathspeak <word>
+    usage: /deathspeak <word|reload>
+    permission: deathspeak.use
+
+permissions:
+  deathspeak.use:
+    default: op
