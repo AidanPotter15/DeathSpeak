@@ -45,7 +45,7 @@ public final class DeathSpeak extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        getLogger().info("DeathSpeak has died. You killed it.");
+        getLogger().info("DeathSpeak has died. You killed it. ");
     }
 
     private void processQueue(){
