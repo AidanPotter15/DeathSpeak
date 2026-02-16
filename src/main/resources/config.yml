@@ -1,3 +1,9 @@
+http:
+  enabled: true
+  host: "127.0.0.1"
+  port: 8765
+  token: "4219443711003321"
+
 # 16x16 area = radius 8 (scans dx: -7..+8 and dz: -7..+8)
 radius: 8
 
@@ -25,8 +31,11 @@ protected-blocks:
 keywords:
 
   # ===== TERRAIN / COMMON =====
-  stone: STONE_LIKE
-  rock: STONE_LIKE
+  stone: STONE
+  magma: MAGMA_BLOCK
+  cobble: COBBLESTONE
+  deepslate: DEEPSLATE
+  tuff: TUFF
 
   dirt: DIRT_LIKE
   mud: DIRT_LIKE
@@ -38,6 +47,8 @@ keywords:
 
   snow: SNOW
   ice: ICE_LIKE
+  dripstone: DRIPSTONE_BLOCK
+
 
   # ===== WOOD (wood = planks only) =====
   wood: PLANKS
@@ -118,4 +129,5 @@ keywords:
 
   # ===== SPECIAL =====
   bedrock: BEDROCK
+  rock: BEDROCK
 

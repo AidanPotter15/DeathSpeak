@@ -9,6 +9,17 @@ import org.bukkit.block.Block;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.Executors;
+
+
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -18,6 +29,7 @@ import java.util.Set;
 //endregion
 
 public final class DeathSpeak extends JavaPlugin {
+
 
     //region State: queue + runtime settings
     private final Queue<String> wordQueue = new LinkedList<>();
@@ -31,6 +43,25 @@ public final class DeathSpeak extends JavaPlugin {
     private final Set<Material> protectedBlocks = EnumSet.noneOf(Material.class);
     private final Map<String, Set<Material>> keywordMap = new HashMap<>();
     //endregion
+
+    //region HTTP ingress settings
+    private boolean httpEnabled = true;
+    private String httpHost = "127.0.0.1";
+    private int httpPort = 8765;
+    private String httpToken = "";
+    private HttpServer httpServer;
+    //endregion
+
+
+    public void queueWord(String phrase, String source) {
+        String word = (phrase == null ? "" : phrase).toLowerCase().trim();
+        if (word.isBlank()) return;
+
+        wordQueue.add(word);
+        getLogger().info("[DeathSpeak] " + source + " spoke: \"" + word + "\"");
+        processQueue();
+    }
+
 
     //region Lifecycle
     @Override
@@ -46,11 +77,15 @@ public final class DeathSpeak extends JavaPlugin {
 
         // Register /deathspeak command
         registerCommands();
+
+        startHttpServer();
+
     }
 
     @Override
     public void onDisable() {
         getLogger().info("DeathSpeak has fallen silent.");
+        stopHttpServer();
     }
     //endregion
 
@@ -78,13 +113,9 @@ public final class DeathSpeak extends JavaPlugin {
             }
 
             // Everything else is treated as the spoken word
-            String word = args[0].toLowerCase();
-            wordQueue.add(word);
+            String phrase = args[0]; // don't force lowercase here; queueWord handles it
+            queueWord(phrase, "Command");
 
-            broadcast("\"" + word + "\" has been spoken...");
-
-            // Kick the processor (queue ensures we run one effect at a time)
-            processQueue();
 
             return true;
         });
@@ -102,8 +133,6 @@ public final class DeathSpeak extends JavaPlugin {
         if (word == null) return;
 
         isProcessing = true;
-
-        broadcast("[DeathSpeak] \"" + word + "\" takes effect instantly.");
 
         // Apply the actual deletion effect
         applyEffect(word);
@@ -130,7 +159,7 @@ public final class DeathSpeak extends JavaPlugin {
         Set<Material> targets = resolveTargets(word);
 
         if (targets.isEmpty()) {
-            broadcast("[DeathSpeak] No targets found for: " + word);
+            getLogger().info("[DeathSpeak] No targets found for: " + word);
             return;
         }
 
@@ -178,14 +207,10 @@ public final class DeathSpeak extends JavaPlugin {
                 }
             }
 
-            if (removedHere > 0) {
-                broadcast("[DeathSpeak] " + player.getName() + " lost " + removedHere + " blocks.");
-            }
-
             totalRemoved += removedHere;
         }
 
-        broadcast("[DeathSpeak] Total removed: " + totalRemoved);
+        getLogger().info("[DeathSpeak] Total removed: " + totalRemoved);
     }
     //endregion
 
@@ -219,18 +244,26 @@ public final class DeathSpeak extends JavaPlugin {
             return EnumSet.of(exactMat);
         }
 
-        // 3) Substring keyword match ("friend" contains "end")
+        // 3) Substring keyword match (LONGEST keyword wins)
         if (substringKeywords) {
-            for (Map.Entry<String, Set<Material>> entry : keywordMap.entrySet()) {
-                String key = entry.getKey(); // already lowercase
+            String bestKey = null;
+
+            for (String key : keywordMap.keySet()) {
                 if (spoken.contains(key)) {
-                    Set<Material> mats = entry.getValue();
-                    if (mats != null && !mats.isEmpty()) {
-                        return EnumSet.copyOf(mats);
+                    if (bestKey == null || key.length() > bestKey.length()) {
+                        bestKey = key;
                     }
                 }
             }
+
+            if (bestKey != null) {
+                Set<Material> mats = keywordMap.get(bestKey);
+                if (mats != null && !mats.isEmpty()) {
+                    return EnumSet.copyOf(mats);
+                }
+            }
         }
+
 
         // 4) No match -> no effect (predictable + safe)
         return EnumSet.noneOf(Material.class);
@@ -279,6 +312,13 @@ public final class DeathSpeak extends JavaPlugin {
         }
 
         getLogger().info("Loaded " + keywordMap.size() + " keyword rules. Radius=" + radius);
+
+        httpEnabled = getConfig().getBoolean("http.enabled", true);
+        httpHost = getConfig().getString("http.host", "127.0.0.1");
+        httpPort = getConfig().getInt("http.port", 8765);
+        httpToken = getConfig().getString("http.token", "");
+
+
     }
 
     private Set<Material> resolveTargetToMaterials(String target) {
@@ -299,16 +339,255 @@ public final class DeathSpeak extends JavaPlugin {
      */
     private Set<Material> resolveTag(String tagNameRaw) {
 
-        String tagName = tagNameRaw.toUpperCase();
+        String tagName = tagNameRaw.trim().toUpperCase();
 
         return switch (tagName) {
-            case "PLANKS" -> EnumSet.copyOf(Tag.PLANKS.getValues());
-            case "WOODEN_SLABS" -> EnumSet.copyOf(Tag.WOODEN_SLABS.getValues());
-            case "WOODEN_STAIRS" -> EnumSet.copyOf(Tag.WOODEN_STAIRS.getValues());
-            case "LOGS" -> EnumSet.copyOf(Tag.LOGS.getValues());
-            case "LEAVES" -> EnumSet.copyOf(Tag.LEAVES.getValues());
+
+            // ===== WOOD GROUPS =====
+            case "PLANKS" -> materialsMatching(name -> name.endsWith("_PLANKS"));
+
+            // logs + woods + stripped variants + stems/hyphae
+            case "LOGS" -> materialsMatching(name ->
+                    name.endsWith("_LOG")
+                            || name.endsWith("_WOOD")
+                            || name.endsWith("_STEM")
+                            || name.endsWith("_HYPHAE")
+                            || (name.startsWith("STRIPPED_") && (
+                            name.endsWith("_LOG") || name.endsWith("_WOOD")
+                                    || name.endsWith("_STEM") || name.endsWith("_HYPHAE")
+                    ))
+            );
+
+            case "LEAVES" -> materialsMatching(name -> name.endsWith("_LEAVES"));
+
+            // ===== UNIVERSAL SHAPES (ALL types) =====
+            case "SLABS" -> materialsMatching(name -> name.endsWith("_SLAB"));
+            case "STAIRS" -> materialsMatching(name -> name.endsWith("_STAIRS"));
+            case "WALLS" -> materialsMatching(name -> name.endsWith("_WALL"));
+            case "FENCES" -> materialsMatching(name -> name.endsWith("_FENCE"));
+            case "FENCE_GATES" -> materialsMatching(name -> name.endsWith("_FENCE_GATE"));
+            case "DOORS" -> materialsMatching(name -> name.endsWith("_DOOR"));
+            case "TRAPDOORS" -> materialsMatching(name -> name.endsWith("_TRAPDOOR"));
+            case "BUTTONS" -> materialsMatching(name -> name.endsWith("_BUTTON"));
+            case "PRESSURE_PLATES" -> materialsMatching(name -> name.endsWith("_PRESSURE_PLATE"));
+
+            // ===== TERRAIN / COMMON =====
+            case "STONE_LIKE" -> {
+                Set<Material> s = EnumSet.noneOf(Material.class);
+                addIfExists(s,
+                        "STONE", "COBBLESTONE", "MOSSY_COBBLESTONE",
+                        "GRANITE", "DIORITE", "ANDESITE",
+                        "DEEPSLATE", "COBBLED_DEEPSLATE",
+                        "TUFF", "CALCITE",
+                        "BLACKSTONE", "BASALT", "SMOOTH_BASALT",
+                        "SANDSTONE", "RED_SANDSTONE"
+                );
+                yield s;
+            }
+
+            case "DIRT_LIKE" -> {
+                Set<Material> s = EnumSet.noneOf(Material.class);
+                addIfExists(s,
+                        "DIRT", "COARSE_DIRT", "ROOTED_DIRT",
+                        "GRASS_BLOCK", "PODZOL", "MYCELIUM",
+                        "MUD", "MUDDY_MANGROVE_ROOTS"
+                );
+                yield s;
+            }
+
+            case "SAND_LIKE" -> {
+                Set<Material> s = EnumSet.noneOf(Material.class);
+                addIfExists(s, "SAND", "RED_SAND");
+                yield s;
+            }
+
+            case "GRAVEL" -> EnumSet.of(Material.GRAVEL);
+            case "CLAY" -> EnumSet.of(Material.CLAY);
+
+            case "SNOW" -> {
+                Set<Material> s = EnumSet.noneOf(Material.class);
+                addIfExists(s, "SNOW", "SNOW_BLOCK");
+                yield s;
+            }
+
+            case "ICE_LIKE" -> materialsMatching(name ->
+                    name.equals("ICE") || name.endsWith("_ICE")
+            );
+
+            // ===== ORES =====
+            // Includes DEEPSLATE_*_ORE and nether ores because they end with _ORE
+            case "ORES" -> {
+                Set<Material> ores = materialsMatching(name -> name.endsWith("_ORE"));
+
+                // Optional: treat Ancient Debris as an ore (comment out if you don't want it under "ore")
+                ores.add(Material.ANCIENT_DEBRIS);
+
+                yield ores;
+            }
+
+            // Specific ore groups (normal + deepslate)
+            case "COAL_ORES" -> materialsMatching(name -> name.endsWith("COAL_ORE"));
+            case "COPPER_ORES" -> materialsMatching(name -> name.endsWith("COPPER_ORE"));
+            case "IRON_ORES" -> materialsMatching(name -> name.endsWith("IRON_ORE"));
+            case "GOLD_ORES" -> materialsMatching(name -> name.endsWith("GOLD_ORE"));
+            case "REDSTONE_ORES" -> materialsMatching(name -> name.endsWith("REDSTONE_ORE"));
+            case "LAPIS_ORES" -> materialsMatching(name -> name.endsWith("LAPIS_ORE"));
+            case "DIAMOND_ORES" -> materialsMatching(name -> name.endsWith("DIAMOND_ORE"));
+            case "EMERALD_ORES" -> materialsMatching(name -> name.endsWith("EMERALD_ORE"));
+
+            // Single blocks some people call out
+            case "NETHER_QUARTZ_ORE" -> EnumSet.of(Material.NETHER_QUARTZ_ORE);
+            case "ANCIENT_DEBRIS" -> EnumSet.of(Material.ANCIENT_DEBRIS);
+
+            // ===== NETHER / END =====
+            case "NETHERRACK" -> EnumSet.of(Material.NETHERRACK);
+
+            case "SOUL_BLOCKS" -> {
+                Set<Material> s = EnumSet.noneOf(Material.class);
+                addIfExists(s, "SOUL_SAND", "SOUL_SOIL");
+                yield s;
+            }
+
+            case "END_STONE" -> EnumSet.of(Material.END_STONE);
+
+            // ===== BUILDING MATERIALS =====
+            case "GLASS" -> materialsMatching(name ->
+                    name.equals("GLASS") || name.endsWith("_STAINED_GLASS")
+            );
+
+            case "GLASS_PANES" -> materialsMatching(name ->
+                    name.equals("GLASS_PANE") || name.endsWith("_STAINED_GLASS_PANE")
+            );
+
+            // Broad, human-friendly “bricks”
+            case "BRICKS" -> materialsMatching(name ->
+                    name.contains("BRICK")
+                            && !name.contains("BRIGHT") // just in case
+            );
+
+            case "CONCRETE" -> materialsMatching(name -> name.endsWith("_CONCRETE"));
+            case "TERRACOTTA" -> materialsMatching(name -> name.equals("TERRACOTTA") || name.endsWith("_TERRACOTTA"));
+            case "WOOL" -> materialsMatching(name -> name.endsWith("_WOOL"));
+
+            // ===== LIQUIDS =====
+            case "WATER" -> EnumSet.of(Material.WATER);
+            case "LAVA" -> EnumSet.of(Material.LAVA);
+
+            // ===== SPECIAL =====
+            case "BEDROCK" -> EnumSet.of(Material.BEDROCK);
+
             default -> EnumSet.noneOf(Material.class);
         };
     }
+
+    /**
+     * Scans all Materials and selects block materials by Material.name() pattern.
+     * This makes categories future-proof across Minecraft/Paper updates.
+     */
+    private Set<Material> materialsMatching(java.util.function.Predicate<String> namePredicate) {
+        Set<Material> result = EnumSet.noneOf(Material.class);
+        for (Material mat : Material.values()) {
+            if (!mat.isBlock()) continue;
+            String name = mat.name(); // uppercase
+            if (namePredicate.test(name)) {
+                result.add(mat);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Adds Material constants by string name if they exist in this server version.
+     * Prevents hard crashes if blocks differ between versions.
+     */
+    private void addIfExists(Set<Material> set, String... materialNames) {
+        for (String n : materialNames) {
+            Material m = Material.matchMaterial(n);
+            if (m != null && m.isBlock()) {
+                set.add(m);
+            }
+        }
+    }
     //endregion
+
+    //region HTTP server
+    private void startHttpServer() {
+        if (!httpEnabled) {
+            getLogger().info("HTTP ingress disabled (http.enabled=false).");
+            return;
+        }
+
+        if (httpToken == null || httpToken.isBlank() || "CHANGE_ME".equalsIgnoreCase(httpToken)) {
+            getLogger().warning("HTTP token is blank/unsafe. Set http.token in config.yml!");
+            return;
+        }
+
+        try {
+            httpServer = HttpServer.create(new InetSocketAddress(httpHost, httpPort), 0);
+            httpServer.createContext("/speak", this::handleSpeak);
+            httpServer.setExecutor(Executors.newFixedThreadPool(2));
+            httpServer.start();
+
+            getLogger().info("HTTP ingress listening on http://" + httpHost + ":" + httpPort + "/speak");
+        } catch (IOException e) {
+            getLogger().severe("Failed to start HTTP server: " + e.getMessage());
+        }
+    }
+
+    private void stopHttpServer() {
+        if (httpServer != null) {
+            httpServer.stop(0);
+            httpServer = null;
+            getLogger().info("HTTP ingress stopped.");
+        }
+    }
+
+    private void handleSpeak(HttpExchange exchange) throws IOException {
+        try {
+            if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                reply(exchange, 405, "method_not_allowed");
+                return;
+            }
+
+            String tokenHeader = exchange.getRequestHeaders().getFirst("X-DeathSpeak-Token");
+            if (tokenHeader == null || !tokenHeader.equals(httpToken)) {
+                reply(exchange, 401, "unauthorized");
+                return;
+            }
+
+            String body = readAll(exchange.getRequestBody()).trim();
+            if (body.isBlank()) {
+                reply(exchange, 400, "empty");
+                return;
+            }
+
+            // Jump to the main server thread before touching Bukkit/world
+            Bukkit.getScheduler().runTask(this, () -> {
+                broadcast("[DeathSpeak] (HTTP) \"" + body + "\" has been spoken...");
+                queueWord(body, "HTTP");
+            });
+
+            reply(exchange, 200, "ok");
+        } catch (Exception e) {
+            getLogger().warning("HTTP /speak error: " + e.getMessage());
+            reply(exchange, 500, "error");
+        } finally {
+            exchange.close();
+        }
+    }
+
+    private static String readAll(InputStream in) throws IOException {
+        return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    private static void reply(HttpExchange exchange, int code, String text) throws IOException {
+        byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
+        exchange.sendResponseHeaders(code, bytes.length);
+        try (OutputStream os = exchange.getResponseBody()) {
+            os.write(bytes);
+        }
+    }
+//endregion
+
 }

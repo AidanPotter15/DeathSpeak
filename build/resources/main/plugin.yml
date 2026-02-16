@@ -3,6 +3,8 @@ version: '0.0.0.5'
 main: net.cosmiccascade.deathspeak.DeathSpeak
 api-version: '1.21'
 
+softdepend: [DiscordSRV]
+
 commands:
   deathspeak:
     description: Trigger DeathSpeak manually
